@@ -3,18 +3,16 @@ use druid::{
     commands, AppDelegate, AppLauncher, Command, DelegateCtx, Env, FileDialogOptions, Lens,
     LocalizedString, Target, Widget, WidgetExt, WindowDesc, Data
 };
-use image::imageops::FilterType;
-use image::GenericImageView;
+use image::{GenericImage, GenericImageView, ImageBuffer};
 use image::jpeg::*;
 use std::io::BufWriter;
 use std::fs::{self, File};
 use std::thread;
 use std::sync::{ Arc, RwLock };
-
 const SIZE_W: u32 = 2100;
 const SIZE_H: u32 = 2970;
 const SIZE_X: u32 = 4200;
-
+use image::Pixel;
 struct Delegate;
 
 #[derive(Data, Clone, Lens)]
@@ -35,15 +33,26 @@ struct SAndD {
 fn resize_a34(sr: &str, dis: &str) ->Result<(), image::error::ImageError> {
     let mut img = image::open(sr)?;
     let (w, h) = img.dimensions();
+    let mut target = ImageBuffer::from_pixel(SIZE_W, SIZE_H, Pixel::from_channels(255, 255, 255, 255));
     if w < h {
-        img = img.resize_to_fill(SIZE_W, SIZE_H, FilterType::Nearest);
+        img = img.thumbnail(SIZE_W, SIZE_H);
+        let (nw,nh) = img.dimensions();
+        let x = (SIZE_W - nw)/2;
+        let y = (SIZE_H - nh)/2;
+        target.copy_from(&img, x, y).unwrap();
     }else {
-        img = img.resize_to_fill(SIZE_X, SIZE_H, FilterType::Nearest);
+        img = img.thumbnail(SIZE_X, SIZE_H);
+        let (nw, nh) = img.dimensions();
+        target = ImageBuffer::from_pixel(SIZE_X, SIZE_H, Pixel::from_channels(255, 255, 255, 255));
+        let x = (SIZE_X - nw)/2;
+        let y = (SIZE_H - nh)/2;
+        target.copy_from(&img, x, y).unwrap();
     }
+ 
     let mut w = BufWriter::new(File::create(dis)?);
     let mut jer = JPEGEncoder::new_with_quality(&mut w, 40);
     jer.set_pixel_density(PixelDensity::dpi(300));
-    jer.encode_image(&img)?;
+    jer.encode_image(&target)?;
     Ok(())
 }
 fn dir_fs(src: &str, dir: &str, dist: &str, count: &mut u64, done: &mut Vec<SAndD>) -> Result<Vec<String>, std::io::Error> {
@@ -61,7 +70,6 @@ fn dir_fs(src: &str, dir: &str, dist: &str, count: &mut u64, done: &mut Vec<SAnd
                     if let Ok(p) = path.path().strip_prefix(src) {
                         let t = format!("{}\\{}", dist, p.to_str().unwrap());
                         if !std::path::Path::new(t.as_str()).exists() {
-                            
                             let mut l = "/";
                             if let Some(idx) = t.rfind('\\') {
                                 l = &t[..idx];
@@ -78,6 +86,11 @@ fn dir_fs(src: &str, dir: &str, dist: &str, count: &mut u64, done: &mut Vec<SAnd
                             *count +=1;
                         }
                         res.push(p.to_str().unwrap().to_string());
+                    }
+                }else if path.path().to_str().unwrap().ends_with("xlsx"){
+                    if let Ok(p) = path.path().strip_prefix(src) {
+                        let t = format!("{}\\{}", dist, p.to_str().unwrap());
+                        fs::copy(path.path(), std::path::Path::new(&t)).unwrap();
                     }
                 }
             }
@@ -140,7 +153,7 @@ fn ui_builder() -> impl Widget<State> {
         let num = num_cpus::get();
         for _ in 0..num+1 {
             let don_ = don.clone();
-            let count = data.count;
+            let count = data.count + 1;
             let ount = count_.clone();
             let h = thread::spawn(move ||{
                 loop {
